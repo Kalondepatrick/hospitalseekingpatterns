@@ -1,0 +1,141 @@
+---
+title: "hospitalseeking"
+author: "Patrick Ken Kalonde"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The 'Geography' of hospital seeking behavior?
+
+This script was developed to clarify my thoughts on how the geography of data for patients seeking care can be analyzed. For a long time, I have assumed that people visit their nearest facility, and this assumption has guided my work in modeling travel time to health facilities and defining catchment areas for health facilities in Blantyre city (a pre-print of my paper, which has been accepted in Nature Communication Medicine, can be accessed [here](https://www.researchsquare.com/article/rs-3528437/v1)). However, I recognize that other factors contribute to shaping the choice of where patients seek care. My colleague, Priscilla Kapolo, is currently seeking training funds to explore in more depth how these choices are influenced.
+
+Regardless, I have extended these methods to model catchment areas for malaria reporting facilities across Malawi. The Infectious Disease Epidemiology Research Group at the Malawi Liverpool Wellcome Programme is working on a paper that will discuss how these catchments can help identify malaria hotspots, using routinely collected facility data and population denominators estimated from the generated catchments and gridded population estimates.
+
+Another key question is: How applicable are these catchments to other diseases? Colleagues within the Public Health Research Group are focusing on tuberculosis (TB), which remains a significant public health burden. Previous work in the group leveraged prevalence surveys to develop methods for identifying neighborhoods with undiagnosed TB. There is potential to expand this work, and in this project, we aim to provide a framework for testing the assumption that people visit their nearest facility for TB care. This will also allow us to explore opportunities for improving our understanding of TB prevalence across different regions.
+
+## Simulation
+
+Assume that we have 10,000 patients and that some (35%) of the patients visit their nearest facility and some visit facilities that are far away from where the person lives.
+
+```{r simulation}
+
+set.seed(123)
+
+n <- 10000
+patient_data <- data.frame(
+  PatientID = 1:n,
+  DistanceToFacility = round(runif(n, min = 0.5, max = 950), 2)
+)
+
+patient_data$near <- sample(c("yes", "no"), size = n, replace = TRUE, prob = c(0.35, 0.65))
+near_indices <- which(patient_data$near == "yes")
+beta_scaled <- 0.5 + (950 - 0.5) * rbeta(length(near_indices), shape1 = 2, shape2 = 5)
+patient_data$DistanceToFacility[near_indices] <- round(beta_scaled, 2)
+
+head(patient_data)
+
+```
+
+# Do people visit their nearest facility?
+
+First, we need to explore on whether or not people visit their nearest facility. Let's first see (visually) how number of patients attending facilities relate to distance from the facility.
+
+```{r exploratory}
+library(ggplot2)
+library(dplyr)
+
+
+distance_summary <- patient_data %>%
+  mutate(DistanceGroup = cut(DistanceToFacility, breaks = seq(0, 1000, by = 50), right = FALSE)) %>%
+  group_by(DistanceGroup, near) %>%
+  summarise(PatientCount = n(), .groups = "drop") %>%
+  filter(!is.na(DistanceGroup))  
+
+
+d <- ggplot(distance_summary, aes(x = DistanceGroup, y = PatientCount, color = near, group = near)) +
+  geom_line(size = 1) +
+  theme_minimal() +
+  labs(
+    title = "Patient Count vs Distance to Facility by Response",
+    x = "Distance Range (km)",
+    y = "Number of Patients"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  scale_color_manual(values = c("skyblue", "salmon"))
+
+d
+
+```
+
+**Is the choice really dependent on distance?**
+
+Test if there are statistical relationship between
+
+```{r relationship}
+
+patient_data$near_binary <- ifelse(patient_data$near == "yes", 1, 0)
+
+
+model <- glm(near_binary ~ DistanceToFacility, data = patient_data, family = binomial)
+summary(model)
+
+
+
+
+
+ggplot(patient_data, aes(x = DistanceToFacility, y = as.numeric(near == "yes"))) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), color = "blue") +
+  labs(
+    title = "Probability of Choosing Near by Distance",
+    x = "Distance to Facility (km)",
+    y = "Probability of Near"
+  ) +
+  theme_minimal()
+```
+
+Here we have seen a strong and statistically significant relationship between distance to facility and probability of choosing nearby facility. With a coefficient of -0.0037, we have also noted that the likelihood of choosing near decreases with increase in distance. I suspect that there might be some distance where the influence of this distance becomes less pronounced, and the competing interaction between facilities might play a crucial role. But this has to be thought for carefully as in urban areas there are better means of transportation that makes distance to be 'less of an issue'.
+
+```{r}
+patient_data$far_binary <- ifelse(patient_data$near == "no", 1, 0)
+
+
+model <- glm(far_binary ~ DistanceToFacility, data = patient_data, family = binomial)
+summary(model)
+
+
+
+
+
+ggplot(patient_data, aes(x = DistanceToFacility, y = as.numeric(near == "no"))) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), color = "blue") +
+  labs(
+    title = "Probability of Choosing Near by Distance",
+    x = "Distance to Facility (km)",
+    y = "Probability of Far"
+  ) +
+  theme_minimal()
+```
+
+Here, we have seen that patients as distance increases, the likelihood for choosing a far away facility is increasing. This suggest that people are suggesting far away for reasons that we do not know yet.
+
+**How can we understand reasons for patients to go to either nearby or far away facilities?**
+
+-   Qualitative ways. Just go out and ask people why they chose to go where they went.
+
+-   Detailed examination of data.
+
+    -   Check if people are preferring a particular facility over the others.
+
+    -   Check how the choice of 'where the person went to' relates to patients characteristics.
+
+## Areas that need careful thought
+
+1.  How do we 'define' distance to nearest facility? Is it based on euclidian distance, road distance or travel time (do these correlate?)
+
+2.  What has been published already on this subject?
